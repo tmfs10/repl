@@ -28,8 +28,13 @@ The trace of a tactic.
 structure TacticTrace where
   stateBefore: String
   stateAfter: String
+  tacticSrc: String
   pos: String.Pos      -- Start position of the tactic.
   endPos: String.Pos   -- End position of the tactic.
+  lineStart: Nat
+  lineEnd: Nat
+  colStart: Nat
+  colEnd: Nat
 deriving ToJson
 
 -- 定义配置结构
@@ -313,14 +318,23 @@ private def visitTacticInfo (ctx : ContextInfo) (ti : TacticInfo) (parent : Info
       else
         let some posBefore := ti.stx.getPos? true | pure ()
         let some posAfter := ti.stx.getTailPos? true | pure ()
+        let startPos : Position := ctx.fileMap.toPosition posBefore
+        let endPos   : Position := ctx.fileMap.toPosition posAfter
+        let tacSubstr : Substring :=
+            ctx.fileMap.source.toSubstring.extract posBefore posAfter   -- **exact** slice
         match ti.stx with
         | .node _ _ _ =>
           modify fun trace => {
             trace with tactics := trace.tactics.push {
               stateBefore := stateBefore,
               stateAfter := stateAfter,
+              tacticSrc   := tacSubstr.toString,
               pos := posBefore,
               endPos := posAfter,
+              lineStart   := startPos.line
+              lineEnd     := endPos.line
+              colStart   := startPos.column
+              colEnd     := endPos.column
              }
           }
         | _ => pure ()
