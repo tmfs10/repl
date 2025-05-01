@@ -284,6 +284,10 @@ end Path
 
 namespace Traversal
 
+partial def collectIdents : Syntax → List Name
+| stx@(.ident _ _ val _) => [val]
+| .node _ _ cs           => cs.toList.bind collectIdents
+| _                      => []
 
 /--
 Extract tactic information from `TacticInfo` in `InfoTree`.
@@ -313,17 +317,38 @@ private def visitTacticInfo (ctx : ContextInfo) (ti : TacticInfo) (parent : Info
       let ctxAfter := { ctx with mctx := ti.mctxAfter }
       let stateBeforeRaw ← Pp.ppGoals ctxBefore ti.goalsBefore
       let stateAfterRaw ← Pp.ppGoals ctxAfter ti.goalsAfter
+
       let collectNames (gs : List MVarId) : MetaM (List Name) := do
         gs.foldlM (init := ([] : List Name)) fun acc g => do
           g.withContext do
             let lctx ← getLCtx
             return lctx.foldl (fun a d => d.userName :: a) acc
+
+      let collectFVarIds (gs : List MVarId) : MetaM (List FVarId) := do
+        gs.foldlM (init := ([] : List FVarId)) fun acc g => do
+          g.withContext do
+            let lctx ← getLCtx
+            return lctx.foldl (fun a d => d.fvarId :: a) acc
+
+      let fvarsBefore ← ctxBefore.runMetaM {} do collectFVarIds ti.goalsBefore
+      let fvarsAfter  ← ctxAfter.runMetaM  {} do collectFVarIds ti.goalsAfter
+
+      let fvarIdToString (id : FVarId) : String := id.name.toString
+      let localsBeforeStr := String.intercalate ", " (fvarsBefore.map fvarIdToString)
+      let localsAfterStr  := String.intercalate ", " (fvarsAfter.map  fvarIdToString)
+
       let namesBefore ← ctxBefore.runMetaM {} do collectNames ti.goalsBefore
       let namesAfter  ← ctxAfter.runMetaM  {} do collectNames ti.goalsAfter
       let namesBeforeStr := String.intercalate ", " (namesBefore.map (·.toString))
       let namesAfterStr  := String.intercalate ", " (namesAfter.map  (·.toString))
-      let stateBefore := stateBeforeRaw ++ "\n-- LOCALS: " ++ namesBeforeStr
-      let stateAfter  := stateAfterRaw  ++ "\n-- LOCALS: " ++ namesAfterStr
+
+      let identsInTac : List Name := collectIdents ti.stx
+      let localsAvailable : List Name := namesBefore ++ namesAfter
+      let refHyps : List Name := identsInTac.filter fun n => localsAvailable.contains n
+      let refHypsStr := String.intercalate ", " (refHyps.map (·.toString))
+
+      let stateBefore := stateBeforeRaw ++ "\n-- LOCALS: " ++ namesBeforeStr ++ "\n-- REFS: " ++ refHypsStr
+      let stateAfter  := stateAfterRaw  ++ "\n-- LOCALS: " ++ namesAfterStr 
       if stateBeforeRaw == "no goals" || stateBefore == stateAfter then
         pure ()
       else
