@@ -311,9 +311,20 @@ private def visitTacticInfo (ctx : ContextInfo) (ti : TacticInfo) (parent : Info
     | ``Lean.Parser.Tactic.tacticSeq1Indented | ``Lean.Parser.Tactic.tacticSeqBracketed | ``Lean.Parser.Tactic.rewriteSeq =>
       let ctxBefore := { ctx with mctx := ti.mctxBefore }
       let ctxAfter := { ctx with mctx := ti.mctxAfter }
-      let stateBefore ← Pp.ppGoals ctxBefore ti.goalsBefore
-      let stateAfter ← Pp.ppGoals ctxAfter ti.goalsAfter
-      if stateBefore == "no goals" || stateBefore == stateAfter then
+      let stateBeforeRaw ← Pp.ppGoals ctxBefore ti.goalsBefore
+      let stateAfterRaw ← Pp.ppGoals ctxAfter ti.goalsAfter
+      let collectNames (gs : List MVarId) : MetaM (List Name) := do
+        gs.foldlM (init := ([] : List Name)) fun acc g => do
+          g.withContext do
+            let lctx ← getLCtx
+            return lctx.foldl (fun a d => d.userName :: a) acc
+      let namesBefore ← ctxBefore.runMetaM {} do collectNames ti.goalsBefore
+      let namesAfter  ← ctxAfter.runMetaM  {} do collectNames ti.goalsAfter
+      let namesBeforeStr := String.intercalate ", " (namesBefore.map (·.toString))
+      let namesAfterStr  := String.intercalate ", " (namesAfter.map  (·.toString))
+      let stateBefore := stateBeforeRaw ++ "\n-- LOCALS: " ++ namesBeforeStr
+      let stateAfter  := stateAfterRaw  ++ "\n-- LOCALS: " ++ namesAfterStr
+      if stateBeforeRaw == "no goals" || stateBefore == stateAfter then
         pure ()
       else
         let some posBefore := ti.stx.getPos? true | pure ()
