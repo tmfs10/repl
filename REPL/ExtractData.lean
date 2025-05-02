@@ -284,10 +284,11 @@ end Path
 
 namespace Traversal
 
-partial def collectIdents : Syntax → List Name
-| stx@(.ident _ _ val _) => [val]
-| .node _ _ cs           => cs.toList.bind collectIdents
-| _                      => []
+partial def collectIdents (stx : Syntax) : List Name :=
+  match stx with
+  | .ident _ _ val _ => [val]
+  | .node _ _ cs     => cs.toList.bind collectIdents
+  | _                => []
 
 /--
 Extract tactic information from `TacticInfo` in `InfoTree`.
@@ -343,12 +344,25 @@ private def visitTacticInfo (ctx : ContextInfo) (ti : TacticInfo) (parent : Info
       let namesAfterStr  := String.intercalate ", " (namesAfter.map  (·.toString))
 
       let identsInTac : List Name := collectIdents ti.stx
+
+      let refFVars ← ctxBefore.runMetaM {} do
+        match ti.goalsBefore.head? with
+        | none    => pure []                       -- should not happen, but be safe
+        | some g  => g.withContext do
+            let lctx ← getLCtx
+            pure <| identsInTac.foldl (init := ([] : List FVarId)) fun acc n =>
+              match lctx.findFromUserName? n.eraseMacroScopes with
+              | some decl => decl.fvarId :: acc
+              | none      => acc
+
+      let refsStr := String.intercalate ", " (refFVars.map fvarIdToString)
+
       let localsAvailable : List Name := namesBefore ++ namesAfter
       let refHyps : List Name := identsInTac.filter fun n => localsAvailable.contains n
       let refHypsStr := String.intercalate ", " (refHyps.map (·.toString))
 
-      let stateBefore := stateBeforeRaw ++ "\n-- LOCALS: " ++ namesBeforeStr ++ "\n-- REFS: " ++ refHypsStr
-      let stateAfter  := stateAfterRaw  ++ "\n-- LOCALS: " ++ namesAfterStr 
+      let stateBefore := stateBeforeRaw ++ "\n-- LOCAL_IDS: " ++ localsBeforeStr ++ "\n-- REF_IDS: " ++ refsStr ++ "\n-- NAMES: " ++ namesBeforeStr ++ "\n-- REFS: " ++ refHypsStr
+      let stateAfter  := stateAfterRaw  ++ "\n-- LOCAL_IDS: " ++ localsAfterStr  ++ "\n-- NAMES: " ++ namesAfterStr
       if stateBeforeRaw == "no goals" || stateBefore == stateAfter then
         pure ()
       else
